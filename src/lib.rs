@@ -53,10 +53,13 @@ pub struct VCRMiddleware {
     compress: bool,
     modify_request: Option<Box<RequestModifier>>,
     modify_response: Option<Box<ResponseModifier>>,
+    request_matcher: Option<Box<RequestMatcher>>,
 }
 
 type RequestModifier = dyn Fn(&mut vcr_cassette::Request) + Send + Sync + 'static;
 type ResponseModifier = dyn Fn(&mut vcr_cassette::Response) + Send + Sync + 'static;
+type RequestMatcher =
+    dyn Fn(&vcr_cassette::Request, &vcr_cassette::Request) -> bool + Send + Sync + 'static;
 
 /// VCR mode switcher
 #[derive(Eq, PartialEq, Clone)]
@@ -104,6 +107,14 @@ impl VCRMiddleware {
         F: Fn(&mut vcr_cassette::Response) + Send + Sync + 'static,
     {
         self.modify_response.replace(Box::new(modifier));
+        self
+    }
+
+    pub fn with_request_matcher<F>(mut self, matcher: F) -> Self
+    where
+        F: Fn(&vcr_cassette::Request, &vcr_cassette::Request) -> bool + Send + Sync + 'static,
+    {
+        self.request_matcher.replace(Box::new(matcher));
         self
     }
 
@@ -250,7 +261,11 @@ impl VCRMiddleware {
         };
 
         for interaction in iteractions {
-            if interaction.request == req {
+            if let Some(ref matcher) = self.request_matcher {
+                if matcher(&interaction.request, &req) {
+                    return Some(interaction.response.clone());
+                };
+            } else if interaction.request == req {
                 return Some(interaction.response.clone());
             }
         }
@@ -349,6 +364,7 @@ impl From<vcr_cassette::Cassette> for VCRMiddleware {
             compress: false,
             modify_request: None,
             modify_response: None,
+            request_matcher: None,
         }
     }
 }
